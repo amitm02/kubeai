@@ -21,6 +21,28 @@ KubeAI supports this strategy for the following endpoints:
 /openai/v1/chat/completions
 ```
 
+## RoutingKey
+
+The RoutingKey strategy provides deterministic routing based on an HTTP header, offering fine-grained control over request distribution, especially useful in scenarios requiring session persistence to specific model instances or when implementing custom routing logic based on request characteristics.
+
+**Behavior:**
+
+*   When `RoutingKey` is selected, the system expects incoming requests to include an optional `Routing-Key` HTTP header. The header name is matched case-insensitively.
+*   The value of this header is used to deterministically route the request to a specific node within a consistent hash ring, similar to the `PrefixHash` strategy. This also leverages the Consistent Hashing with Bounded Loads (CHWBL) algorithm.
+*   If the `Routing-Key` header is absent:
+    *   If `fallbackToLeastLoad` is `true` (the default), the request is routed using the `LeastLoad` strategy.
+    *   If `fallbackToLeastLoad` is `false`, the request is rejected with an HTTP 400 error.
+
+**Configuration Fields:**
+
+The `RoutingKey` strategy is configured under the `loadBalancing.routingKey` section in the Model CRD:
+
+*   `meanLoadPercentage` (integer, optional, default: `125`): Defines the maximum allowed load of any given endpoint as a percentage over the mean load of all endpoints in the hash ring (CHWBL parameter). Minimum value is `100`.
+*   `replication` (integer, optional, default: `256`): Specifies the number of virtual replicas for each endpoint on the hash ring. Higher values lead to better load distribution but may increase lookup times. This field is immutable after creation.
+*   `fallbackToLeastLoad` (boolean, optional, default: `true`): Controls the behavior when the `Routing-Key` header is not present. If `true`, defaults to `LeastLoad`; if `false`, rejects the request.
+
+See the [Kubernetes API docs](../reference/kubernetes-api.md) to view how to configure Model load balancing, including an example of the `RoutingKey` strategy.
+
 ## Next
 
 See the [Kubernetes API docs](../reference/kubernetes-api.md) to view how to configure Model load balancing.

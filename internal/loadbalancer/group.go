@@ -11,10 +11,17 @@ import (
 )
 
 func newEndpointGroup(lb v1.LoadBalancing) *group {
+	replication := lb.PrefixHash.Replication // Default to PrefixHash replication
+	if lb.Strategy == v1.RoutingKeyStrategy && lb.RoutingKey != nil {
+		// RoutingKeyStrategy also uses CHWBL, so set replication if specified.
+		// model_types.go ensures RoutingKey.Replication has a default if RoutingKey is not nil.
+		replication = lb.RoutingKey.Replication
+	}
+
 	g := &group{
 		endpoints:         make(map[string]endpoint),
 		totalInFlight:     &atomic.Int64{},
-		chwblReplication:  lb.PrefixHash.Replication,
+		chwblReplication:  replication,
 		chwblHashes:       map[uint64]string{},
 		chwblSortedHashes: []uint64{},
 		bcast:             make(chan struct{}),
@@ -70,12 +77,34 @@ func (g *group) getBestAddr(ctx context.Context, req *apiutils.Request, awaitCha
 		ep, found = g.chwblGetAddr(req.Adapter+req.Prefix, float64(req.LoadBalancing.PrefixHash.MeanLoadPercentage)/100, req.Adapter)
 	case v1.LeastLoadStrategy:
 		ep, found = g.getAddrLeastLoad(req.Adapter)
+	case v1.RoutingKeyStrategy:
+		// CRD defaulting should ensure RoutingKey is not nil if strategy is RoutingKey.
+		// However, defensive check is good practice.
+		if req.LoadBalancing.RoutingKey == nil {
+			// This case should ideally not be reached if CRD validation and defaulting are correct.
+			// Fallback to LeastLoad or return an error. For now, let's assume CRD ensures it's populated.
+			// If it can happen, an error might be more appropriate:
+			// return "", func() {}, fmt.Errorf("RoutingKey strategy selected but configuration is missing")
+			ep, found = g.getAddrLeastLoad(req.Adapter) // Fallback to least load
+		} else {
+			routingKeyConfig := req.LoadBalancing.RoutingKey
+			key := extractRoutingKeyHeader(req.HTTPRequest)
+			meanLoadFactor := float64(routingKeyConfig.MeanLoadPercentage) / 100.0
+			ep, found = g.getAddrRoutingKey(key, meanLoadFactor, routingKeyConfig.FallbackToLeastLoad, req.Adapter)
+
+			if !found && key == "" && !routingKeyConfig.FallbackToLeastLoad {
+				g.mtx.RUnlock()
+				return "", func() {}, ErrRoutingKeyMissingNoFallback
+			}
+		}
 	default:
 		return "", func() {}, fmt.Errorf("unknown load balancing strategy: %v", req.LoadBalancing.Strategy)
 	}
 
 	if !found {
 		g.mtx.RUnlock()
+		// Endpoint not found (e.g. CHWBL couldn't find one, or all endpoints are down for least load)
+		// Retry by awaiting endpoint changes.
 		return g.getBestAddr(ctx, req, true)
 	}
 

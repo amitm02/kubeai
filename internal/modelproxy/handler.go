@@ -10,6 +10,7 @@ import (
 
 	v1 "github.com/substratusai/kubeai/api/k8s/v1"
 	"github.com/substratusai/kubeai/internal/apiutils"
+	"github.com/substratusai/kubeai/internal/loadbalancer"
 	"github.com/substratusai/kubeai/internal/metrics"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -99,6 +100,9 @@ func (h *Handler) proxyHTTP(w http.ResponseWriter, pr *proxyRequest) {
 	addr, decrementInflight, err := h.loadBalancer.AwaitBestAddress(pr.http.Context(), pr.Request)
 	if err != nil {
 		switch {
+		case errors.Is(err, loadbalancer.ErrRoutingKeyMissingNoFallback):
+			pr.sendErrorResponse(w, http.StatusBadRequest, "Routing-Key header is required when fallbackToLeastLoad is disabled.")
+			return
 		case errors.Is(err, context.Canceled):
 			pr.sendErrorResponse(w, http.StatusInternalServerError, "request cancelled while finding host: %v", err)
 			return

@@ -176,15 +176,39 @@ type LoadBalancing struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default={}
 	PrefixHash PrefixHash `json:"prefixHash,omitempty"`
+	// +kubebuilder:validation:Optional
+	RoutingKey *RoutingKeyStrategy `json:"routingKey,omitempty"`
 }
 
-// +kubebuilder:validation:Enum=LeastLoad;PrefixHash
+// +kubebuilder:validation:Enum=LeastLoad;PrefixHash;RoutingKey
 type LoadBalancingStrategy string
 
 const (
 	LeastLoadStrategy  LoadBalancingStrategy = "LeastLoad"
 	PrefixHashStrategy LoadBalancingStrategy = "PrefixHash"
+	RoutingKeyStrategy LoadBalancingStrategy = "RoutingKey"
 )
+
+type RoutingKeyStrategy struct {
+	// MeanLoadPercentage is the percentage that any given endpoint's load must not exceed
+	// over the mean load of all endpoints in the hash ring. Defaults to 125% which is
+	// a widely accepted value for the Consistent Hashing with Bounded Loads algorithm.
+	// +kubebuilder:default=125
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:Minimum=100
+	MeanLoadPercentage int `json:"meanLoadPercentage,omitempty"`
+	// Replication is the number of replicas of each endpoint on the hash ring.
+	// Higher values will result in a more even distribution of load but will
+	// decrease lookup performance.
+	// +kubebuilder:default=256
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="replication is immutable."
+	Replication int `json:"replication,omitempty"`
+	// FallbackToLeastLoad determines whether to fall back to least load strategy if no routing key is provided.
+	// +kubebuilder:default=true
+	// +kubebuilder:validation:Optional
+	FallbackToLeastLoad bool `json:"fallbackToLeastLoad,omitempty"`
+}
 
 type PrefixHash struct {
 	// MeanLoadPercentage is the percentage that any given endpoint's load must not exceed
