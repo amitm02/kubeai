@@ -177,7 +177,7 @@ type LoadBalancing struct {
 	// +kubebuilder:default={}
 	PrefixHash PrefixHash `json:"prefixHash,omitempty"`
 	// +kubebuilder:validation:Optional
-	RoutingKey *RoutingKeyStrategy `json:"routingKey,omitempty"`
+	RoutingKey RoutingKeyStrategy `json:"routingKey,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=LeastLoad;PrefixHash;RoutingKey

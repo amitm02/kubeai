@@ -11,19 +11,22 @@ import (
 )
 
 func newEndpointGroup(lb v1.LoadBalancing) *group {
-	replication := lb.PrefixHash.Replication // Default to PrefixHash replication
-	if lb.Strategy == v1.RoutingKeyStrategy && lb.RoutingKey != nil {
-		// RoutingKeyStrategy also uses CHWBL, so set replication if specified.
-		// model_types.go ensures RoutingKey.Replication has a default if RoutingKey is not nil.
+	var replication int
+	if lb.Strategy == v1.RoutingKeyStrategy {
 		replication = lb.RoutingKey.Replication
+	} else if lb.Strategy == v1.PrefixHashStrategy {
+		replication = lb.PrefixHash.Replication
 	}
+	// If not RoutingKey or PrefixHash, replication will be 0 (default int value),
+	// which is fine as chwblReplication is only used by CHWBL-based strategies.
+	// The .Replication fields themselves have defaults from CRD (e.g., 256).
 
 	g := &group{
 		endpoints:         make(map[string]endpoint),
 		totalInFlight:     &atomic.Int64{},
 		chwblReplication:  replication,
-		chwblHashes:       map[uint64]string{},
-		chwblSortedHashes: []uint64{},
+		chwblHashes:       make(map[uint64]string), // Always initialize for CHWBL strategies
+		chwblSortedHashes: make([]uint64, 0),    // Always initialize for CHWBL strategies
 		bcast:             make(chan struct{}),
 	}
 	return g
@@ -78,24 +81,16 @@ func (g *group) getBestAddr(ctx context.Context, req *apiutils.Request, awaitCha
 	case v1.LeastLoadStrategy:
 		ep, found = g.getAddrLeastLoad(req.Adapter)
 	case v1.RoutingKeyStrategy:
-		// CRD defaulting should ensure RoutingKey is not nil if strategy is RoutingKey.
-		// However, defensive check is good practice.
-		if req.LoadBalancing.RoutingKey == nil {
-			// This case should ideally not be reached if CRD validation and defaulting are correct.
-			// Fallback to LeastLoad or return an error. For now, let's assume CRD ensures it's populated.
-			// If it can happen, an error might be more appropriate:
-			// return "", func() {}, fmt.Errorf("RoutingKey strategy selected but configuration is missing")
-			ep, found = g.getAddrLeastLoad(req.Adapter) // Fallback to least load
-		} else {
-			routingKeyConfig := req.LoadBalancing.RoutingKey
-			key := extractRoutingKeyHeader(req.HTTPRequest)
-			meanLoadFactor := float64(routingKeyConfig.MeanLoadPercentage) / 100.0
-			ep, found = g.getAddrRoutingKey(key, meanLoadFactor, routingKeyConfig.FallbackToLeastLoad, req.Adapter)
+		key := extractRoutingKeyHeader(req.HTTPRequest)
+		// req.LoadBalancing.RoutingKey is now a struct, its fields have defaults from CRD
+		meanLoadFactor := float64(req.LoadBalancing.RoutingKey.MeanLoadPercentage) / 100.0
+		fallbackToLeastLoad := req.LoadBalancing.RoutingKey.FallbackToLeastLoad
 
-			if !found && key == "" && !routingKeyConfig.FallbackToLeastLoad {
-				g.mtx.RUnlock()
-				return "", func() {}, ErrRoutingKeyMissingNoFallback
-			}
+		ep, found = g.getAddrRoutingKey(key, meanLoadFactor, fallbackToLeastLoad, req.Adapter)
+
+		if !found && key == "" && !fallbackToLeastLoad {
+			g.mtx.RUnlock() // Release lock before returning
+			return "", func() {}, ErrRoutingKeyMissingNoFallback
 		}
 	default:
 		return "", func() {}, fmt.Errorf("unknown load balancing strategy: %v", req.LoadBalancing.Strategy)
