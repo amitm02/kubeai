@@ -189,22 +189,28 @@ const (
 	RoutingKeyStrategy LoadBalancingStrategy = "RoutingKey"
 )
 
+// RoutingKeyStrategy defines the configuration for the RoutingKey load balancing strategy.
+// +kubebuilder:object:generate=true
 type RoutingKeyStrategy struct {
-	// MeanLoadPercentage is the percentage that any given endpoint's load must not exceed
-	// over the mean load of all endpoints in the hash ring. Defaults to 125% which is
-	// a widely accepted value for the Consistent Hashing with Bounded Loads algorithm.
+	// MeanLoadPercentage defines the maximum allowed load of any given endpoint
+	// as a percentage over the mean load of all endpoints in the hash ring.
+	// Defaults to 125%, which is a standard value for the Consistent Hashing with Bounded Loads algorithm.
 	// +kubebuilder:default=125
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:Minimum=100
 	MeanLoadPercentage int `json:"meanLoadPercentage,omitempty"`
-	// Replication is the number of replicas of each endpoint on the hash ring.
-	// Higher values will result in a more even distribution of load but will
-	// decrease lookup performance.
+
+	// Replication defines the number of virtual replicas of each endpoint on the hash ring.
+	// A higher value leads to better load distribution at the cost of slower lookup times.
+	// This field is immutable after creation.
 	// +kubebuilder:default=256
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="replication is immutable."
 	Replication int `json:"replication,omitempty"`
-	// FallbackToLeastLoad determines whether to fall back to least load strategy if no routing key is provided.
+
+	// FallbackToLeastLoad controls behavior when the Routing-Key header is not present.
+	// If true (default), the request is routed using the LeastLoad strategy.
+	// If false, the request is rejected with a 400 error.
 	// +kubebuilder:default=true
 	// +kubebuilder:validation:Optional
 	FallbackToLeastLoad bool `json:"fallbackToLeastLoad,omitempty"`
